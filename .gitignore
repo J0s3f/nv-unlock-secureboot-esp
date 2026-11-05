@@ -1,0 +1,17 @@
+# private key material and downloaded tools (created by setup-signing.sh)
+work/
+*.key
+*.pem
+*.crt
+*.cer
+# upstream release, generated stick roots, firmware
+release/
+usbroot*/
+*.bin
+*.efi
+*.EFI
+# logs and benchmark results (contain hardware identifiers)
+*.log
+bench/results/
+.venv/
+__pycache__/
