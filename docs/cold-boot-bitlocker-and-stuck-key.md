@@ -63,8 +63,18 @@ Firmware `read_key()` returns `Special(LEFT)` on every poll from the moment the 
 - `UsbPortReset()` on `0C45:7E0C` (and the other Microdia device, `0C45:8006`, which was not involved) reported
   success but the key came back immediately.
 
-What works: when the input never goes quiet, the loader falls back to **ESC-only**. Other keys are ignored, the
-countdown runs to PROCEED, and Esc still aborts. Cold boot with BitLocker protection on, mouse attached:
+What works: when the input never goes quiet, ignore that key. Two variants were run on this machine:
+
+- **ESC-only fallback** (my first version, v2.1.10 build, hardware-tested): all keys except Esc are ignored for the
+  boot. This is what the logs below show.
+- **Phantom-key suppression** (what the maintainer asked for in the review of PR #220, now in the PR branch, **not run
+  on hardware yet**): the same key value on >= 3 consecutive polls is suppressed for this boot, Space/Enter/other
+  keys keep their meaning, Esc is never suppressed, the console prints
+  `INPUT-SETTLE: Special(LEFT) repeated 3x - phantom key, suppressed for this boot`. A healthy boot returns after one
+  quiet poll instead of waiting 1 s. PR #222 adds `	x-ignore-key.txt` (put `Special(LEFT)` in it) to make this permanent
+  without a rebuild.
+
+Cold boot with BitLocker protection on, mouse attached, ESC-only build:
 
 ```
 INPUT-SETTLE: input never went quiet (stuck/streaming key) - countdown abort is now ESC-ONLY, other keys are ignored
@@ -78,9 +88,10 @@ No recovery prompt, no event 24707 for those boots.
 
 ### Loader change
 
-Upstream PR: <https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220>
-(branch `J0s3f:input-settle`, based on `main` 2.1.12-rc1). Hardware testing was done with the same change on
-v2.1.10; the rebased branch builds and passes `cargo xt` but was not run on hardware. Until it is merged you either
+Upstream PRs: <https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220> (settle + suppression, branch
+`J0s3f:input-settle`) and <https://github.com/physicsdolphin/nv-uefi-unlocker/pull/222> (`tx-ignore-key.txt`).
+Hardware testing was done with the ESC-only variant on v2.1.10; the current branches build and pass `cargo xt` but
+were not run on hardware. Until it is merged you either
 build that branch, or unplug the receiver/mouse for the countdown, or use a mouse without a keyboard interface.
 
 Optional `\input-reset.txt` on the ESP root (`usb VID:PID` per line) makes the loader port-reset those devices before

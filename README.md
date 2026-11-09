@@ -206,7 +206,7 @@ FP16/BF16/TF32 should go up clearly, while FP32 (the control) should stay about 
 - **Power-off resets the unlock.** With the default entry it runs again at every boot. Without the default entry, use `reboot-unlock.ps1`.
 - **Sleep and hibernate** may re-lock the card (see the upstream FAQ). Restarting fixes it.
 - **Windows updates and firmware updates** sometimes move Windows Boot Manager back to the first place. Nothing breaks, the card just runs locked. Re-run `set-default.ps1`.
-- **Skipping the unlock once:** press any key during the countdown. If a USB device keeps reporting a key (seen with a mouse that has a keyboard interface), a loader with [PR #220](https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220) switches to *Esc only* and says so in `loader.log`; without it the countdown aborts by itself on cold boots and BitLocker asks for the recovery key. Details: [docs/cold-boot-bitlocker-and-stuck-key.md](docs/cold-boot-bitlocker-and-stuck-key.md).
+- **Skipping the unlock once:** press any key during the countdown. If a USB device keeps reporting a key (seen with a mouse that has a keyboard interface), a loader with [PR #220](https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220) suppresses that one key value for the boot (Esc never) and says so on screen and in `loader.log`; [PR #222](https://github.com/physicsdolphin/nv-uefi-unlocker/pull/222) adds `	x-ignore-key.txt` to ignore it permanently; without it the countdown aborts by itself on cold boots and BitLocker asks for the recovery key. Details: [docs/cold-boot-bitlocker-and-stuck-key.md](docs/cold-boot-bitlocker-and-stuck-key.md).
 - **If a boot hangs or the screen stays black:** don't retry in the same session. Power off completely, choose *Windows Boot Manager* in the firmware boot menu, and read `loader.log` (upstream recovery guide).
 - **Switching between booting with and without the unlocker** changes the measured boot path. Each switch makes BitLocker ask for the recovery key unless you suspend it first: `Suspend-BitLocker -MountPoint $env:SystemDrive -RebootCount 1`. The scripts do this whenever they change the boot path.
 - **Upstream update:** repeat steps 2, 4 and 6. `install-esp.ps1` updates the files in place and keeps the boot entry.
@@ -248,7 +248,7 @@ sudo mokutil --delete MOK.cer      # set a one-time password
 | `install-esp.ps1`: not enough space | The ESP is too small (common: 100 MB). Build only your GPU's family (`-Family 30` etc.), or resize the ESP. |
 | `drive S: is in use` | Pass `-Letter X:` with a free drive letter to every script that takes one. |
 | Unlock not active after wake-up | Sleep/hibernate re-locked the card. Restart. |
-| Recovery key on cold boot only, `loader.log` says `key Special(LEFT) during the 5s armed countdown - ABORT` | A USB device reports a key by itself. Unplug it to confirm, then use a loader with PR #220 (ESC-only fallback). See [docs](docs/cold-boot-bitlocker-and-stuck-key.md). |
+| Recovery key on cold boot only, `loader.log` says `key Special(LEFT) during the 5s armed countdown - ABORT` | A USB device reports a key by itself. Unplug it to confirm, then use a loader with PR #220 (phantom-key suppression) and PR #222 (`tx-ignore-key.txt`). See [docs](docs/cold-boot-bitlocker-and-stuck-key.md). |
 | Shim prints `Invalid Parameter ... falling back to default loader` | The firmware entry carries the Windows OptionalData. Run `fix-boot-entry.ps1`. |
 | Two "NV Unlock" entries in `bcdedit /enum firmware` | See [Duplicate entry](#duplicate-nv-unlock-entry). |
 
