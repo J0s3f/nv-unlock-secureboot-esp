@@ -10,6 +10,9 @@ This repository contains **no unlocker code, no NVIDIA firmware and no shim bina
 - `scripts/windows/reboot-unlock.ps1` does one unlocked boot.
 - `scripts/windows/set-default.ps1` makes the unlock run on every boot, or reverts that.
 - `scripts/windows/uninstall-esp.ps1` removes everything again.
+- `scripts/windows/fix-boot-entry.ps1` strips the Windows OptionalData from the firmware entry (called by `install-esp.ps1`; fixes shim's `Invalid Parameter` message).
+- `scripts/windows/replace-loader.ps1` swaps only `grubx64.efi` for a new signed build, with backup and `-Rollback`.
+- `scripts/windows/diagnostics/` read-only boot/BitLocker/TPM diagnostics (`Collect-BootDiagnostics.ps1`).
 - `scripts/windows/get-loader-log.ps1` reads the loader's log from the ESP.
 - `bench/bench.py` is a before/after tensor throughput benchmark.
 
@@ -154,6 +157,8 @@ What the script does:
 - It copies the signed EFI files to `\EFI\nvunlock\` and the family assets to the ESP root. It refuses to overwrite a foreign file with different content.
 - It creates `\i_know_what_i_am_doing.txt`. This is upstream's own marker: **5 s countdown, then auto-run, and any key aborts**. Pass `-NoAutoRun` to keep upstream's "press Space/Enter within 30 s" behaviour.
 - It adds the firmware boot entry **"NV Unlock"** at the **end** of the boot order, so normal boots don't change yet.
+- It then runs `fix-boot-entry.ps1`, which removes the Windows OptionalData from that entry (skip with `-NoFixEntry`). Without this, shim prints `Invalid Parameter ... falling back to default loader` at every boot. See [Duplicate entry](#duplicate-nv-unlock-entry).
+- Optional `-UsbResetDevices 0C45:7E0C` writes `\input-reset.txt` (needs the loader from [upstream PR #220](https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220)).
 - It stores its state (entry id and the list of installed files) in `%ProgramData%\nv-unlock-esp\`.
 
 ### 7. One unlocked boot from the disk
@@ -201,7 +206,7 @@ FP16/BF16/TF32 should go up clearly, while FP32 (the control) should stay about 
 - **Power-off resets the unlock.** With the default entry it runs again at every boot. Without the default entry, use `reboot-unlock.ps1`.
 - **Sleep and hibernate** may re-lock the card (see the upstream FAQ). Restarting fixes it.
 - **Windows updates and firmware updates** sometimes move Windows Boot Manager back to the first place. Nothing breaks, the card just runs locked. Re-run `set-default.ps1`.
-- **Skipping the unlock once:** press any key during the countdown.
+- **Skipping the unlock once:** press any key during the countdown. If a USB device keeps reporting a key (seen with a mouse that has a keyboard interface), a loader with [PR #220](https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220) switches to *Esc only* and says so in `loader.log`; without it the countdown aborts by itself on cold boots and BitLocker asks for the recovery key. Details: [docs/cold-boot-bitlocker-and-stuck-key.md](docs/cold-boot-bitlocker-and-stuck-key.md).
 - **If a boot hangs or the screen stays black:** don't retry in the same session. Power off completely, choose *Windows Boot Manager* in the firmware boot menu, and read `loader.log` (upstream recovery guide).
 - **Switching between booting with and without the unlocker** changes the measured boot path. Each switch makes BitLocker ask for the recovery key unless you suspend it first: `Suspend-BitLocker -MountPoint $env:SystemDrive -RebootCount 1`. The scripts do this whenever they change the boot path.
 - **Upstream update:** repeat steps 2, 4 and 6. `install-esp.ps1` updates the files in place and keeps the boot entry.
@@ -243,6 +248,24 @@ sudo mokutil --delete MOK.cer      # set a one-time password
 | `install-esp.ps1`: not enough space | The ESP is too small (common: 100 MB). Build only your GPU's family (`-Family 30` etc.), or resize the ESP. |
 | `drive S: is in use` | Pass `-Letter X:` with a free drive letter to every script that takes one. |
 | Unlock not active after wake-up | Sleep/hibernate re-locked the card. Restart. |
+| Recovery key on cold boot only, `loader.log` says `key Special(LEFT) during the 5s armed countdown - ABORT` | A USB device reports a key by itself. Unplug it to confirm, then use a loader with PR #220 (ESC-only fallback). See [docs](docs/cold-boot-bitlocker-and-stuck-key.md). |
+| Shim prints `Invalid Parameter ... falling back to default loader` | The firmware entry carries the Windows OptionalData. Run `fix-boot-entry.ps1`. |
+| Two "NV Unlock" entries in `bcdedit /enum firmware` | See [Duplicate entry](#duplicate-nv-unlock-entry). |
+
+### Duplicate NV Unlock entry
+
+After `fix-boot-entry.ps1` writes the cleaned `Boot####`, Windows may import it as a second BCD object and re-create
+the old copy (with OptionalData) as another firmware entry, listed first. The script cleans this up automatically; to do it by hand:
+
+```powershell
+bcdedit /enum firmware                    # two entries with path \EFI\nvunlock\shimx64.efi
+Get-Content "$env:ProgramData\nv-unlock-esp\entry-id.txt"   # the OLD copy created by install-esp.ps1
+bcdedit /delete "{old-id}"                # delete only the old copy
+Set-Content "$env:ProgramData\nv-unlock-esp\entry-id.txt" "{id-of-the-remaining-entry}"
+```
+
+The remaining entry is of type "Firmware application (101fffff)" and has no OptionalData
+(`fix-boot-entry.ps1 -Inspect` shows 0 bytes). Background and evidence: [docs/cold-boot-bitlocker-and-stuck-key.md](docs/cold-boot-bitlocker-and-stuck-key.md).
 
 ## Credits
 

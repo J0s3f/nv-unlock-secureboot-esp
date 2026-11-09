@@ -10,14 +10,21 @@ Normal boots are unchanged until you run set-default.ps1 (or use reboot-unlock.p
   ESP:\EFI\nvunlock\MOK.cer       your certificate (for enrolling from the ESP)
   ESP:\<family assets>            the loader reads its assets from the volume root
   ESP:\i_know_what_i_am_doing.txt upstream marker: 5 s auto-run, any key aborts
+  ESP:\input-reset.txt           optional (-UsbResetDevices): USB devices to port-reset before the countdown
+
+After the boot entry is created, fix-boot-entry.ps1 removes the Windows OptionalData from it
+(otherwise shim prints "Invalid Parameter ... falling back to default loader" on every boot).
+Use -NoFixEntry to skip that.
 
 Usage:
-  .\install-esp.ps1 -Src C:\path\to\usbroot-sb [-Letter S:] [-NoAutoRun]
+  .\install-esp.ps1 -Src C:\path\to\usbroot-sb [-Letter S:] [-NoAutoRun] [-UsbResetDevices 0C45:7E0C] [-NoFixEntry]
 #>
 param(
     [Parameter(Mandatory)][string]$Src,
     [string]$Letter = "S:",
-    [switch]$NoAutoRun     # keep upstream "Space/Enter within 30 s" confirmation instead
+    [switch]$NoAutoRun,    # keep upstream "Space/Enter within 30 s" confirmation instead
+    [string[]]$UsbResetDevices = @(),   # VID:PID list for \input-reset.txt (needs a loader that reads it)
+    [switch]$NoFixEntry    # do not strip the Windows OptionalData from the boot entry
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot "common.ps1")
@@ -62,6 +69,11 @@ try {
         New-Item -ItemType File -Force "$Letter\i_know_what_i_am_doing.txt" | Out-Null
         $installed += "i_know_what_i_am_doing.txt"
     }
+    if ($UsbResetDevices.Count) {
+        foreach ($d in $UsbResetDevices) { if ($d -notmatch '^[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}$') { throw "bad VID:PID '$d' (expected e.g. 0C45:7E0C)" } }
+        Set-Content -Path "$Letter\input-reset.txt" -Value ($UsbResetDevices | ForEach-Object { "usb $_" }) -Encoding ascii
+        $installed += "input-reset.txt"
+    }
     New-Item -ItemType Directory -Force $StateDir | Out-Null
     Set-Content -Path $FilesList -Value $installed
 
@@ -87,6 +99,12 @@ if ($id) {
     "boot entry created: $id"
 }
 bcdedit /enum $id
+if (-not $NoFixEntry) {
+    ""
+    "Removing the Windows OptionalData from the firmware entry (fix-boot-entry.ps1) ..."
+    try { & (Join-Path $PSScriptRoot "fix-boot-entry.ps1") }
+    catch { Write-Warning "fix-boot-entry.ps1 failed: $($_.Exception.Message) - the entry still works, shim will just print the Invalid Parameter message. Run .\fix-boot-entry.ps1 -Inspect and see the README." }
+}
 ""
 "Done. The normal boot order is unchanged."
 "Next: .\reboot-unlock.ps1 (one unlocked boot)  or  .\set-default.ps1 (every boot)."
