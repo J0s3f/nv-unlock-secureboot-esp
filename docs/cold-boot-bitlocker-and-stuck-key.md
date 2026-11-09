@@ -63,35 +63,49 @@ Firmware `read_key()` returns `Special(LEFT)` on every poll from the moment the 
 - `UsbPortReset()` on `0C45:7E0C` (and the other Microdia device, `0C45:8006`, which was not involved) reported
   success but the key came back immediately.
 
-What works: when the input never goes quiet, ignore that key. Two variants were run on this machine:
+What works: ignore that one key value. Two variants were run on this machine:
 
-- **ESC-only fallback** (my first version, v2.1.10 build, hardware-tested): all keys except Esc are ignored for the
-  boot. This is what the logs below show.
-- **Phantom-key suppression** (what the maintainer asked for in the review of PR #220, now in the PR branch, **not run
-  on hardware yet**): the same key value on >= 3 consecutive polls is suppressed for this boot, Space/Enter/other
-  keys keep their meaning, Esc is never suppressed, the console prints
-  `INPUT-SETTLE: Special(LEFT) repeated 3x - phantom key, suppressed for this boot`. A healthy boot returns after one
-  quiet poll instead of waiting 1 s. PR #222 adds `	x-ignore-key.txt` (put `Special(LEFT)` in it) to make this permanent
-  without a rebuild.
+- **ESC-only fallback** (first version, v2.1.10 build): all keys except Esc are ignored for the boot.
+- **Phantom-key suppression** (the design the maintainer asked for in the review of PR #220, branch head `3b5ee16`):
+  the same key value on >= 3 consecutive polls is suppressed for this boot only. Space/Enter/other keys keep their
+  meaning, Esc is never suppressed, and the console prints
+  `INPUT-SETTLE: Special(LEFT) repeated 3x - phantom key, suppressed for this boot`. PR #222 adds `\tx-ignore-key.txt`
+  (put `Special(LEFT)` in it) to make it permanent without a rebuild; that file was not used in these runs.
 
-Cold boot with BitLocker protection on, mouse attached, ESC-only build:
+**Do not skip the settle after one quiet poll.** A first build that returned as soon as the first poll was quiet
+(the maintainer's suggested short-circuit) failed with this mouse: the first poll after the blocking console read is
+quiet, the stream starts ~50 ms later, the settle was skipped and the armed countdown aborted 320 ms after it opened
+(no unlock; the boot then re-binds BitLocker to the aborted state, so suspend again before the next boot). The fix is a
+300 ms quiet window when nothing was buffered (instead of the original 1 s), and the full 1 s after any key.
+
+Cold boots, branch head `3b5ee16`, BitLocker suspended for the boot by the deploy script:
 
 ```
-INPUT-SETTLE: input never went quiet (stuck/streaming key) - countdown abort is now ESC-ONLY, other keys are ignored
+# mouse plugged in
+INPUT-SETTLE: settle: discarded key Special(LEFT) at +50 ms   (also +100, +150)
+INPUT-SETTLE: Special(LEFT) repeated 3x - phantom key, suppressed for this boot
+INPUT-SETTLE: settle done after 1200 ms, discarded 3 key(s), quiet 1000 ms, 20 swallowed after suppression
 CONFIRM: 5s armed countdown elapsed - PROCEED (marker file opted in)
 SELECTOR RESULT: SS0=0x88888888 SS1=0x8
 POST-FLR: verified (selectors survive AON)
 FINAL: transaction complete, all DMA released
+
+# mouse and receiver unplugged
+INPUT-SETTLE: settle done after 300 ms, discarded 0 key(s), quiet 300 ms, 0 swallowed after suppression
+CONFIRM: 5s armed countdown elapsed - PROCEED (marker file opted in)
+...
+FINAL: transaction complete, all DMA released
 ```
 
-No recovery prompt, no event 24707 for those boots.
+Earlier ESC-only build, protection active: same PROCEED/FINAL lines, no recovery prompt, no new event 24707. Not yet
+tested: pressing Space/Enter/Esc during the countdown while a key is suppressed, QEMU, and a cold boot with BitLocker
+protection active on the PR build.
 
 ### Loader change
 
 Upstream PRs: <https://github.com/physicsdolphin/nv-uefi-unlocker/pull/220> (settle + suppression, branch
 `J0s3f:input-settle`) and <https://github.com/physicsdolphin/nv-uefi-unlocker/pull/222> (`tx-ignore-key.txt`).
-Hardware testing was done with the ESC-only variant on v2.1.10; the current branches build and pass `cargo xt` but
-were not run on hardware. Until it is merged you either
+Hardware: branch head `3b5ee16` ran two cold boots on this machine (with and without the mouse, results above). Until it is merged you either
 build that branch, or unplug the receiver/mouse for the countdown, or use a mouse without a keyboard interface.
 
 Optional `\input-reset.txt` on the ESP root (`usb VID:PID` per line) makes the loader port-reset those devices before
